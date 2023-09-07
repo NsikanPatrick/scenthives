@@ -16,12 +16,19 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import render
 from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
+
+def home(request):
+    return render(request, "home.html")
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+
+    path('', home),
 
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     # Optional: Include Swagger UI view
