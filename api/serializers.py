@@ -1,0 +1,164 @@
+from django.contrib.auth.models import User
+from rest_framework import serializers
+from shop.models import Perfume, PerfumeImage, Category, Review, Cart, Cartitems
+from userprofile.models import UserProfile
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['id', 'user', 'email', 'phone_number', 'shipping_address', 'billing_address', 'profile_picture']
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'password']  # Include other fields as needed
+        extra_kwargs = {'password': {'write_only': True}}  # To hide password when serialized
+
+    def create(self, validated_data):
+        user = User.objects.create_user(**validated_data)
+        return user
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ['category_id', 'title', 'gender', 'slug']
+
+
+class PerfumeImageSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = PerfumeImage
+            fields = ['id', 'perfume', 'image']
+
+
+class PerfumeSerializer(serializers.ModelSerializer):
+    images = PerfumeImageSerializer(many=True, read_only=True)
+
+    uploaded_images = serializers.ListField(
+        child = serializers.ImageField(max_length=1000000, allow_empty_file=False, use_url=False),
+        write_only=True
+    )
+
+    class Meta:
+        model = Perfume # The images, category uploaded_images field was removed in the fields below since it was commented above
+        fields = ['id', 'name', 'description', 'price', 'inventory', 'images', 'uploaded_images']
+    
+    # Serializing the category field to have more context 
+    # category = CategorySerializer()
+    
+
+    # The method will store the details in the two tables. But how do we write the test to
+    # ensure it has stored in the two tables. The listfield we used to create the
+    # uploaded_images variable is not supported in HTML browser, we had to make use of
+    # postman, maybe that's why its giving issues to test
+    def create(self, validated_data):
+        uploaded_images = validated_data.pop("uploaded_images") # Removes the uploaded images from the list of data
+        perfume = Perfume.objects.create(**validated_data) #unpacks the validated data
+
+        for image in uploaded_images:
+            new_perfume_image = PerfumeImage.objects.create(perfume=perfume, image=image)
+
+        return perfume
+
+    def update(self, instance, validated_data):
+        uploaded_images = validated_data.pop("uploaded_images", None)
+
+        instance.name = validated_data.get('name', instance.name)
+        instance.description = validated_data.get('description', instance.description)
+        instance.price = validated_data.get('price', instance.price)
+        instance.inventory = validated_data.get('inventory', instance.inventory)
+        instance.save()
+
+        if uploaded_images:
+            instance.images.all().delete()
+            for image in uploaded_images:
+                PerfumeImage.objects.create(perfume=instance, image=image)
+
+        return instance
+
+
+class SimplePerfumeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Perfume
+        fields = ['id','name', 'price']
+
+
+class CartItemSerializer(serializers.ModelSerializer):
+    perfume = SimplePerfumeSerializer(many=False)
+    sub_total = serializers.SerializerMethodField(method_name="total")
+
+    class Meta:
+            model = Cartitems
+            fields = ['id', 'perfume', 'quantity', 'sub_total']
+
+    def total(self,cartitem:Cartitems):
+         return cartitem.quantity * cartitem.perfume.price
+
+
+class AddCartItemSerializer(serializers.ModelSerializer):
+    perfume_id = serializers.UUIDField()
+    class Meta:
+          model = Cartitems
+          fields = ['id', 'perfume_id', 'quantity']
+    
+    def validate_perfume_id(self, value):
+        # Methd to check if there's a perfume in the database with the received id
+        # Since we cant add a non existent product to cart
+         if not Perfume.objects.filter(pk=value).exists():
+              raise serializers.ValidationError('There is no perfume associated with the given ID')
+         
+         return value
+    
+    def save(self, **kwargs):
+        cart_id = self.context['cart_id'] # This was passed through the cartitemviewset
+        perfume_id = self.validated_data['perfume_id']
+        quantity = self.validated_data['quantity'] 
+
+        # We want to only save the cart item if it was received from the client, else we create it
+        try:
+            #  This block will update the item in the cart if it exists already
+             cartitem = Cartitems.objects.get(perfume_id=perfume_id, cart_id=cart_id)
+             cartitem.quantity += quantity
+             cartitem.save()
+
+             self.instance = cartitem
+        except:
+            #  This block will create the item in the cart if it wasnt there already
+            # self.instance = Cartitems.objects.create(perfume_id=perfume_id, cart_id=cart_id, quantity=quantity)
+            self.instance = Cartitems.objects.create(cart_id=cart_id, **self.validated_data)
+
+        return self.instance  
+
+
+class UpdateCartItemSerializer(serializers.ModelSerializer):
+    # id = serializers.IntegerField(read_only=True)
+    class Meta:
+        model = Cartitems
+        fields = ['quantity']  
+     
+
+class CartSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(read_only=True)
+    items = CartItemSerializer(many=True, read_only=True)
+    grand_total = serializers.SerializerMethodField(method_name="cart_total")
+    
+    class Meta:
+            model = Cart
+            fields = ['id', 'items', 'grand_total']
+
+    def cart_total(self, cart: Cart):
+         items = cart.items.all()
+         total = sum([item.quantity * item.perfume.price for item in items])
+         return total
+    
+
+class ReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+            model = Review
+            fields = ['id', 'perfume', 'date_created', 'description', 'customer_name']
+
+    # Overiding the create method for review so as to use the context passed from the view class
+    def create(self, validated_data):
+        perfume_id = self.context["perfume_id"] # This was passed through the Reviewviewset
+        return Review.objects.create(perfume_id = perfume_id, **validated_data)
