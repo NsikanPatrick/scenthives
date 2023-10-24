@@ -8,11 +8,18 @@ from rest_framework import status
 from rest_framework.decorators import action
 from django.contrib.auth.models import User
 from django.contrib.auth import login
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from userprofile.models import UserProfile
 from shop.models import Category, Perfume, Cart, Cartitems, Review
-from .serializers import UserProfileSerializer, UserSerializer, CategorySerializer, PerfumeSerializer, ReviewSerializer, CartSerializer, CartItemSerializer, AddCartItemSerializer, UpdateCartItemSerializer
+from order.models import Order
+from .serializers import UserProfileSerializer, UserSerializer, CategorySerializer, PerfumeSerializer, ReviewSerializer, CartSerializer, CartItemSerializer, AddCartItemSerializer, UpdateCartItemSerializer, OrderSerializer, CreateOrderSerilaizer, UpdateOrderSerializer
 
+import requests
+from decouple import config
+from django.shortcuts import redirect
+from django.http import JsonResponse
+from django.urls import reverse 
+from django.shortcuts import render
 
 # Importing searchfilter orderingfilter to implement search and sorting
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -20,6 +27,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.pagination import PageNumberPagination
 # Importing product filters from the filters.py file
 from api.filters import PerfumeFilter
+from .import permissions
 
 # Create your views here.
 class UserProfileViewSet(ModelViewSet):
@@ -117,6 +125,113 @@ class ReviewViewSet(ModelViewSet):
         return {"perfume_id": self.kwargs["perfume_pk"]}  # Retrieving the id of the particular
     # perfume and passing it to the serializer, so we can add the review to that particular perfume
 
+
+
+class OrderViewSet(ModelViewSet):
+    # queryset = Order.objects.all()
+    # serializer_class = OrderSerializer
+    # permission_classes = [IsAuthenticated, permissions.IsOrderOwnerOrAdmin]
+
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_permissions(self):
+        if self.request.method in ['PATCH', 'DELETE']:
+            return [IsAdminUser()]
+        return [IsAuthenticated()]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return Order.objects.all()
+        (user_id, created) = User.objects.only('id').get_or_create(user_id=user.id)
+        return Order.objects.filter(user_id=user_id)
+
+    def create(self, request, *args, **kwargs):
+        serilizer = CreateOrderSerilaizer(data=request.data, context={"user_id": self.request.user.id})
+        serilizer.is_valid(raise_exception=True)
+        order = serilizer.save()
+        serializer = OrderSerializer(order)
+
+        return Response(serializer.data)
+
+    # def get_serializer_context(self):
+    #     return {"user_id": self.request.user.id}
+    
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateOrderSerilaizer
+        elif self.request.method == "PATCH":
+            return UpdateOrderSerializer
+        return OrderSerializer
+    
+
+    # Integrating paystack payment gateway
+    @action(detail=True, methods=['get'])
+    def initiate_payment(self, request, pk):
+
+        PAYSTACK_SECRET_KEY = config('PAYSTACK_SECRET_KEY')
+
+        order = self.get_object()  # Retrieve the order
+        amount_in_kobo = int(order.total_amount * 100)  # Convert to kobo
+
+        # Prepare data for initiating payment
+        data = {
+            "email": order.email,
+            "amount": amount_in_kobo,
+            "order_id": order.id, #any other unique identifyer should work
+            "callback_url": request.build_absolute_uri(reverse('paystack_callback')),  # Use your callback URL
+            # Add any other required fields
+        }
+
+        headers = {
+            "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        # Send a POST request to Paystack to initialize the payment
+        response = requests.post("https://api.paystack.co/transaction/initialize", json=data, headers=headers)
+
+        if response.status_code == 200:
+            payment_info = response.json()
+            return redirect(payment_info['data']['authorization_url'])
+        else:
+            return JsonResponse({'error': 'Payment initiation failed'}, status=400)
+        
+    # Callback method
+    def paystack_callback(request):
+        PAYSTACK_SECRET_KEY = config('PAYSTACK_SECRET_KEY')
+        reference = request.GET.get('reference')
+        # Verify the payment with the reference using Paystack API
+
+        data = {
+            "reference": reference,
+            "authorization_code": request.GET.get('authorization_code')
+        }
+
+        headers = {
+            "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post("https://api.paystack.co/transaction/verify", json=data, headers=headers)
+
+        if response.status_code == 200:
+            payment_info = response.json()
+            if payment_info['data']['status'] == 'success':
+                # Payment was successful, update your order's status
+                order = Order.objects.get(id=payment_info['data']['metadata']['order_id'])
+                order.is_completed = True
+                order.save()
+                return render(request, 'payment_success.html')
+            else:
+                return render(request, 'payment_failed.html', {'error': 'Payment verification failed'})
+
+
+   
+
+    
+   
+        
 
 # @api_view()
 # def category_list(request):

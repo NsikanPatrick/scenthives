@@ -1,6 +1,8 @@
 from django.contrib.auth.models import User
+from django.db import transaction
 from rest_framework import serializers
 from shop.models import Perfume, PerfumeImage, Category, Review, Cart, Cartitems
+from order.models import Order, OrderItem
 from userprofile.models import UserProfile
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -162,3 +164,67 @@ class ReviewSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         perfume_id = self.context["perfume_id"] # This was passed through the Reviewviewset
         return Review.objects.create(perfume_id = perfume_id, **validated_data)
+    
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+     perfume = SimplePerfumeSerializer()
+
+     class Meta:
+          model = OrderItem
+          fields = ['id', 'perfume', 'price', 'quantity']
+
+
+
+class OrderSerializer(serializers.ModelSerializer):
+     items = OrderItemSerializer(many = True)
+
+     class Meta:
+          model = Order
+          fields = ['id', 'user', 'created_at', 'status', 'items']
+
+
+class UpdateOrderSerializer(serializers.ModelSerializer):
+     class Meta:
+          model = Order
+          fields = ['status']
+
+
+class CreateOrderSerilaizer(serializers.Serializer):
+     cart_id = serializers.UUIDField()
+
+     def validate_cart_id(self, cart_id):
+          if not Cart.objects.filter(pk=cart_id).exists():
+               raise serializers.ValidationError("No cart with the given ID was found")
+          if Cartitems.objects.filter(cart_id=cart_id).count() == 0:
+               raise serializers.ValidationError("The given cart is empty")
+          return cart_id
+
+     def save(self, **kwargs):
+        #   Wrapping all the code in transaction so they can be excuted at once to avoid
+        # inconsistencies in the cases of a failure
+          with transaction.atomic():
+            cart_id = self.validated_data['cart_id']
+        #   print(self.validated_data['cart_id'])
+        #   print(self.context['user_id'])
+
+          (user, created) = User.objects.get_or_create(id=self.context['user_id'])
+          order = Order.objects.create(user=user)
+
+          cart_items = Cartitems.objects.select_related('perfume').filter(cart_id=cart_id)
+
+          order_items = [
+                OrderItem(
+                    order = order,
+                    perfume = item.perfume,
+                    price = item.perfume.price,
+                    quantity = item.quantity
+                ) for item in cart_items
+          ]
+
+          OrderItem.objects.bulk_create(order_items)
+
+        #   Delete the cart after the order has been placed
+          Cart.objects.filter(pk=cart_id).delete()
+
+          return order

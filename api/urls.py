@@ -15,6 +15,7 @@ router.register(r'users', views.UserViewSet)
 router.register('categories', views.CategoryViewSet) #the name of the endpoint here shouldnt have a forward slash (!categories/)
 router.register('perfumes', views.PerfumesViewSet)
 router.register('carts', views.CartViewSet)
+router.register('orders', views.OrderViewSet, basename='order')
 
 pprint(router.urls) #Printing the url patterns on the terminal to check whats expectected
 
@@ -36,8 +37,15 @@ urlpatterns = [
     path("", include(router.urls)),
     path("", include(perfume_router.urls)), # Gives access to the perfume child router and the reviews resource
     path("", include(cart_router.urls)),   # Gives access to the cart child
+    # Paystack urls
+    path("orders/<uuid:pk>/initiate-payment/", views.OrderViewSet.as_view({"get": "initiate_payment"}), name="initiate-payment"),
+    path("paystack-callback/", views.OrderViewSet.as_view({"get": "paystack_callback"}), name="paystack-callback"),
+   
     # path('categories/', views.category_list),
     # path('category_detail/<int:id>/', views.category_detail),
     # path('categories/<str:pk>', views.ApiCategory.as_view())
     
 ]
+
+# Url pattern for order payment
+# /orders/{order_id}/initiate-payment/

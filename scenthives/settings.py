@@ -10,22 +10,27 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+from decouple import config
 from pathlib import Path
 import os
+from datetime import timedelta
 import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8jyyk86)l38k$w(fsxf0hxc4)ssd23=gw(=q_r!m@$65vuobp^'
+SECRET_KEY = '####################################################'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG = ######
 
 ALLOWED_HOSTS = ['*']
 
@@ -41,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework.authtoken',
     'django_filters',
+    'djoser',
     'rest_framework',
     'api',
     'shop',
@@ -83,16 +89,16 @@ WSGI_APPLICATION = 'scenthives.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
-
 DATABASES = {
-    'default': dj_database_url.parse(os.environ.get("DATABASE_URL"))
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
 }
+
+# DATABASES = {
+#     'default': dj_database_url.parse(os.environ.get("DATABASE_URL"))
+# }
 
 
 # Password validation
@@ -139,15 +145,33 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
     'COERCE_DECIMAL_TO_STRING': False, # Renders numbers as decimal values, not as strings
-    'PAGE_SIZE': 10,
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 9,
+    'COERCE_DECIMAL_TO_STRING': False,
 
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema', 
 }
+
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'ScentHives Ecom API Service',
     'VERSION': '1.0.0',
 }
 
+
+# Configure token expiration time (optional)
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=2),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    # Activate this when you want to use bearer tokens in postman
+    # "AUTH_HEADER_TYPES": ("Bearer",),
+
+    # Activate this when you want to work on the browser ModHeader extension
+    "AUTH_HEADER_TYPES": ("JWT",),
+}

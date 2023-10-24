@@ -38,5 +38,11 @@ urlpatterns = [
     path('api/docs/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     path("api/", include("api.urls")),
+
+    # Djoser and simplejwt urls
+
+    path('auth/', include('djoser.urls')),
+    path('auth/', include('djoser.social.urls')),
+    path('auth/', include('djoser.urls.jwt')),
 ]
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
