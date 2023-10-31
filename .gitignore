@@ -8,8 +8,9 @@ env.bak/
 venv.bak/
 myenv
 
+
 *venv
 *.env
 bin/
 lib/
-*.sqlite3
+# *.sqlite3
